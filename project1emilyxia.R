@@ -15,11 +15,11 @@ category_table <- fread("/Users/lulu/Downloads/category_table.csv")
 ##select target customer (who puchased once before 2016/11/22 and then were dormant for the following 3 months)
 
 # change from scientific notation to the actual number
-customer_table[,customer_id := as.character(customer_table$customer_id)]
-order_table[,customer_id := as.character(order_table$customer_id)]
-order_table[,order_id := as.character(order_table$order_id)]
-order_table[,product_id := as.character(order_table$product_id)]
-product_table[,product_id := as.character(product_table$product_id)]
+customer_table$customer_id <- as.character(customer_table$customer_id)
+order_table$customer_id <- as.character(order_table$customer_id)
+order_table$order_id <- as.character(order_table$order_id)
+order_table$product_id <- as.character(order_table$product_id)
+product_table$product_id <- as.character(product_table$product_id)
 
 # find customers who only made one purchase before 2016/11/22
 one_time_purchaser <- subset( 
@@ -45,7 +45,7 @@ target_user <- cbind(target_user,dormant_3month[,c("order_date","order_amount","
 #find customers who purchased again between 2017/02/22 and 2017/05/22
 purchase_again2_customer_id <- unique(subset(order_table, order_date>='2017022'&order_date<'20170522'&order_amount>0),by='customer_id')$customer_id
 
-target_user$flag <- as.factor(ifelse(target_user$customer_id %in% puchase_again2_customer_id, 'YES','NO'))
+target_user$flag <- as.factor(ifelse(target_user$customer_id %in% purchase_again2_customer_id, 'YES','NO'))
 
 rm(one_time_purchaser,dormant_3month,purchase_again_customer,purchase_again2_customer_id)
 
@@ -65,7 +65,7 @@ target_user[,c("first_visit_date","order_date","product_id")] <- NULL
 #deal with missing value
 target_user$category_id[is.na(target_user$category_id)] <- 'unknown'
 target_user$latest_device_class[is.na(target_user$latest_device_class)] <- 'unknown'
-sum(is.na(target_user))
+target_user[is.na(target_user)] <- 0
 
 #dummy coding
 top_countries <- as.character(as.matrix(target_user[,list(Count=.N), by = country][order(-Count)][1:30][,.(country)]))
@@ -110,7 +110,6 @@ test_data <- transformedAll[-training_index,]
 
 train_x <- subset(train_data, select = -c(flag))
 train_y <- as.factor(apply(subset(train_data, select = c(flag)), 2, as.factor))
-train_y_categorial <- ifelse(train_y == 1, "YES", "NO")
 
 test_x <- subset(test_data, select = -c(flag))
 test_y <- as.factor(apply(subset(test_data, select = c(flag)), 2, as.factor))
@@ -118,7 +117,7 @@ test_y <- as.factor(apply(subset(test_data, select = c(flag)), 2, as.factor))
 registerDoMC(cores=6)
 
 #Lasso Logistic Regression
-model_glm_cv_lasso <- cv.glmnet(data.matrix(train_x),train_y_categorial,alpha = 1,family="binomial",type.measure="auc",parallel=TRUE)
+model_glm_cv_lasso <- cv.glmnet(data.matrix(train_x),train_y,alpha = 1,family="binomial",type.measure="auc",parallel=TRUE)
 
 lasso_predict <- predict(model_glm_cv_lasso, data.matrix(test_x),type='response')
 lasso_pred <- prediction(lasso_predict,test_y)
@@ -126,8 +125,12 @@ lasso_perf_recall <- performance(lasso_pred,"prec","rec")
 lasso_perf_roc <- performance(lasso_pred,"tpr","fpr")
 lasso_perf_auc <- performance(lasso_pred,"auc")
 
+plot(lasso_perf_recall)
+plot(lasso_perf_roc)
+lasso_perf_auc@y.values
+
 #Ridge Logistic Regression
-model_glm_cv_ridge <- cv.glmnet(data.matrix(train_x),train_y_categorial,alpha = 0,family="binomial",type.measure="auc",parallel=TRUE)
+model_glm_cv_ridge <- cv.glmnet(data.matrix(train_x),train_y,alpha = 0,family="binomial",type.measure="auc",parallel=TRUE)
 
 ridge_predict <- predict(model_glm_cv_ridge, data.matrix(test_x),type='response')
 ridge_pred <- prediction(ridge_predict,test_y)
@@ -135,15 +138,22 @@ ridge_perf_recall <- performance(ridge_pred,"prec","rec")
 ridge_perf_roc <- performance(ridge_pred,"tpr","fpr")
 ridge_perf_auc <- performance(ridge_pred,"auc")
 
+plot(ridge_perf_recall)
+plot(ridge_perf_roc)
+ridge_perf_auc@y.values
+
 #Random Forest
-rf <- foreach(ntree=rep(200, 6), .combine='combine', .multicombine=TRUE,
+rf <- foreach(ntree=rep(200, 6), .combine='c', .multicombine=TRUE,
               .packages='randomForest') %dopar% {
                 randomForest(train_x, train_y, ntree=ntree)
               }
 
 rf_predict <- predict(rf, data.matrix(test_x),type='response')
-lasso_pred <- prediction(lasso_predict,test_y)
-lasso_perf_recall <- performance(lasso_pred,"prec","rec")
-lasso_perf_roc <- performance(lasso_pred,"tpr","fpr")
-lasso_perf_auc <- performance(lasso_pred,"auc")
+rf_pred <- prediction(rf_predict,test_y)
+rf_perf_recall <- performance(rf_pred,"prec","rec")
+rf_perf_roc <- performance(rf_pred,"tpr","fpr")
+rf_perf_auc <- performance(rf_pred,"auc")
 
+plot(rf_perf_recall)
+plot(rf_perf_roc)
+rf_perf_auc@y.values
